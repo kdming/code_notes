@@ -1,0 +1,15 @@
+利用了channel和读写锁，实现的内存kv存储
+每个键值对超时时长（生成一个时间戳）,get时判断是否超时，超时返回nil （此时数据，就算超时，可能也还没有删除）
+有一个定时回收垃圾机制，每隔一段时间，会吧超时的数据，真正删除，如果kv有回调函数，则在删除后执行回调函数
+
+
+ticker := time.NewTicker(j.Interval) // 定时器
+for {
+    select {
+    case <-ticker.C:
+        c.DeleteExpired() // 定时器触发，进行删除操作
+    case <-j.stop:
+        ticker.Stop() // 判断是否需要停止
+        return
+    }
+}

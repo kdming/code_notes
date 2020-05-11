@@ -54,9 +54,12 @@ func (c *cache) Set(k string, x interface{}, d time.Duration) {
 	if d == DefaultExpiration {
 		d = c.defaultExpiration
 	}
+	fmt.Println(d, "默认超时时长")
 	if d > 0 {
 		e = time.Now().Add(d).UnixNano()
 	}
+	fmt.Println(e, "纳秒数时间戳")
+	// 写锁开启
 	c.mu.Lock()
 	c.items[k] = Item{
 		Object:     x,
@@ -118,15 +121,19 @@ func (c *cache) Replace(k string, x interface{}, d time.Duration) error {
 // Get an item from the cache. Returns the item or nil, and a bool indicating
 // whether the key was found.
 func (c *cache) Get(k string) (interface{}, bool) {
-	c.mu.RLock()
+	c.mu.RLock() // 开启读锁
 	// "Inlining" of get and Expired
+	// 如果没找到对应的key就直接return nil, false
 	item, found := c.items[k]
 	if !found {
 		c.mu.RUnlock()
 		return nil, false
 	}
+	// 判断是否超时选项
 	if item.Expiration > 0 {
+		// 如果超时了，也直接return nil, false
 		if time.Now().UnixNano() > item.Expiration {
+			fmt.Println("超时了")
 			c.mu.RUnlock()
 			return nil, false
 		}
@@ -906,18 +913,22 @@ func (c *cache) Delete(k string) {
 	c.mu.Lock()
 	v, evicted := c.delete(k)
 	c.mu.Unlock()
+	// 有回调函数，就执行回调
 	if evicted {
 		c.onEvicted(k, v)
 	}
 }
 
 func (c *cache) delete(k string) (interface{}, bool) {
+	// 判断是否有删除的回调函数
+	// 如果有回调函数，要在删除前把具体的值返回
 	if c.onEvicted != nil {
 		if v, found := c.items[k]; found {
 			delete(c.items, k)
 			return v.Object, true
 		}
 	}
+	// 反之直接删除 没有原来的值了
 	delete(c.items, k)
 	return nil, false
 }
@@ -929,19 +940,22 @@ type keyAndValue struct {
 
 // Delete all expired items from the cache.
 func (c *cache) DeleteExpired() {
-	var evictedItems []keyAndValue
+	var evictedItems []keyAndValue // 要被删除的k,v
 	now := time.Now().UnixNano()
 	c.mu.Lock()
 	for k, v := range c.items {
 		// "Inlining" of expired
+		// 判断是否过期
 		if v.Expiration > 0 && now > v.Expiration {
 			ov, evicted := c.delete(k)
+			// 有回调函数的要把值保存下来，执行回调
 			if evicted {
 				evictedItems = append(evictedItems, keyAndValue{k, ov})
 			}
 		}
 	}
 	c.mu.Unlock()
+	// 执行回调函数
 	for _, v := range evictedItems {
 		c.onEvicted(v.key, v.value)
 	}
@@ -1069,18 +1083,19 @@ func (c *cache) Flush() {
 }
 
 type janitor struct {
-	Interval time.Duration
-	stop     chan bool
+	Interval time.Duration // 定时周期
+	stop     chan bool     // 是否停止
 }
 
 func (j *janitor) Run(c *cache) {
-	ticker := time.NewTicker(j.Interval)
+	fmt.Println(j.Interval, "定时清理周期")
+	ticker := time.NewTicker(j.Interval) // 定时器
 	for {
 		select {
 		case <-ticker.C:
-			c.DeleteExpired()
+			c.DeleteExpired() // 定时器触发，进行删除操作
 		case <-j.stop:
-			ticker.Stop()
+			ticker.Stop() // 判断是否需要停止
 			return
 		}
 	}
@@ -1090,6 +1105,7 @@ func stopJanitor(c *Cache) {
 	c.janitor.stop <- true
 }
 
+// 超时清理启动 - - - >
 func runJanitor(c *cache, ci time.Duration) {
 	j := &janitor{
 		Interval: ci,
@@ -1100,6 +1116,7 @@ func runJanitor(c *cache, ci time.Duration) {
 }
 
 func newCache(de time.Duration, m map[string]Item) *cache {
+	// 超时为0就设置为不过期
 	if de == 0 {
 		de = -1
 	}
@@ -1118,8 +1135,11 @@ func newCacheWithJanitor(de time.Duration, ci time.Duration, m map[string]Item) 
 	// garbage collected, the finalizer stops the janitor goroutine, after
 	// which c can be collected.
 	C := &Cache{c}
+	// 这里判断是否有过期时间，有就启动相关程序
 	if ci > 0 {
+		// 启动超时清理程序
 		runJanitor(c, ci)
+		// 在C被清理前，执行stopJanitor
 		runtime.SetFinalizer(C, stopJanitor)
 	}
 	return C
@@ -1131,7 +1151,7 @@ func newCacheWithJanitor(de time.Duration, ci time.Duration, m map[string]Item) 
 // manually. If the cleanup interval is less than one, expired items are not
 // deleted from the cache before calling c.DeleteExpired().
 func New(defaultExpiration, cleanupInterval time.Duration) *Cache {
-	items := make(map[string]Item)
+	items := make(map[string]Item) // 初始化item
 	return newCacheWithJanitor(defaultExpiration, cleanupInterval, items)
 }
 
