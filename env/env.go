@@ -168,6 +168,7 @@ func doParse(ref reflect.Value, funcMap map[reflect.Type]ParserFunc) error {
 			}
 			continue
 		}
+		fmt.Println("准备set", value)
 		if err := set(refField, refTypeField, value, funcMap); err != nil {
 			return err
 		}
@@ -182,6 +183,7 @@ func get(field reflect.StructField) (val string, err error) {
 	var expand = strings.EqualFold(field.Tag.Get("envExpand"), "true")
 
 	key, opts := parseKeyForOption(field.Tag.Get("env"))
+	fmt.Println(key, opts)
 
 	for _, opt := range opts {
 		switch opt {
@@ -196,19 +198,24 @@ func get(field reflect.StructField) (val string, err error) {
 		}
 	}
 
+	// 判断是否有些默认值，如果环境变量中没有该值，则取默认值
 	defaultValue := field.Tag.Get("envDefault")
 	val, exists = getOr(key, defaultValue)
 
+	// 字符替换
 	if expand {
 		val = os.ExpandEnv(val)
 	}
 
+	// 判断环境变量是否存在
 	if required && !exists {
 		return "", fmt.Errorf(`env: required environment variable %q is not set`, key)
 	}
 
+	// 判断是否要加载文件，val就是文件名
 	if loadFile && val != "" {
 		filename := val
+		// 直接读取文件，输出为字符串
 		val, err = getFromFile(filename)
 		if err != nil {
 			return "", fmt.Errorf(`env: could not load content of file "%s" from variable %s: %v`, filename, key, err)
@@ -255,6 +262,8 @@ func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[
 		fieldee = field.Elem()
 	}
 
+	fmt.Println(typee, fieldee)
+
 	parserFunc, ok := funcMap[typee]
 	if ok {
 		val, err := parserFunc(value)
@@ -281,20 +290,26 @@ func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[
 }
 
 func handleSlice(field reflect.Value, value string, sf reflect.StructField, funcMap map[reflect.Type]ParserFunc) error {
+
 	var separator = sf.Tag.Get("envSeparator")
 	if separator == "" {
 		separator = ","
 	}
 	var parts = strings.Split(value, separator)
 
+	fmt.Println(parts, "parts")
+
 	var typee = sf.Type.Elem()
 	if typee.Kind() == reflect.Ptr {
 		typee = typee.Elem()
 	}
 
+	// 这里其实就是根据 reflect.New() 判断是否是目标类型，进行对应的转换方法
 	if _, ok := reflect.New(typee).Interface().(encoding.TextUnmarshaler); ok {
 		return parseTextUnmarshalers(field, parts, sf)
 	}
+
+	fmt.Println(typee, "parts")
 
 	parserFunc, ok := funcMap[typee]
 	if !ok {

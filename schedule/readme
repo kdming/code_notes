@@ -1,0 +1,130 @@
+go-cron 定时任务管理包，官方使用示例
+```
+func task() {
+	fmt.Println("I am running task.")
+}
+
+
+func main() {
+	// Do jobs without params
+	gocron.Every(2).Hours().Do(task)
+	<- gocron.Start()
+}
+```
+1. gocron.Every(1) 代码
+```
+// Every schedule a new periodic job with interval
+func (s *Scheduler) Every(interval uint64) *Job {
+	job := NewJob(interval).Loc(s.loc) // 生成任务设置 任务时区
+	s.jobs[s.size] = job               // 填充任务到任务列表
+	s.size++                           // 当前任务列表长度+1
+	return job
+}
+
+```
+NewJob代码如下:
+<!--more-->
+```
+type Job struct {
+	interval uint64                   // pause interval * unit bettween runs // 任务间隔单位
+	jobFunc  string                   // the job jobFunc to run, func[jobFunc] // 要执行的方法
+	unit     timeUnit                 // time units, ,e.g. 'minutes', 'hours'... // 时间单位
+	atTime   time.Duration            // optional time at which this job runs  // 指定时间运行方法
+	loc      *time.Location           // optional timezone that the atTime is in  // 时区
+	lastRun  time.Time                // datetime of last run                   // 最近运行时间
+	nextRun  time.Time                // datetime of next run                   // 下次运行时间
+	startDay time.Weekday             // Specific day of the week to start on    // 时间单位为周时记录启动时间天
+	funcs    map[string]interface{}   // Map for the function task store           // 要执行的方法
+	fparams  map[string][]interface{} // Map for function and  params of function  // 要执行的方法参数
+	lock     bool                     // lock the job from running at same time form multiple instances // 在相同的时间只运行一个实例
+	tags     []string                 // allow the user to tag jobs with certain labels     // 标签
+}
+
+// NewJob creates a new job with the time interval.
+func NewJob(interval uint64) *Job {
+	return &Job{
+		interval,
+		"", 0, 0,
+		loc,
+		time.Unix(0, 0),
+		time.Unix(0, 0),
+		time.Sunday,
+		make(map[string]interface{}),
+		make(map[string][]interface{}),
+		false,
+		[]string{},
+	}
+}
+
+
+```
+> 初始化一个任务，并把该任务加入到默认任务队列里面
+
+2. Hours()
+```
+func (j *Job) Hours() *Job {
+	return j.setUnit(hours)
+}
+
+
+```
+> 设置任务的时间单位为小时
+
+3. Do() 开始运行
+```
+    // 判断是否是方法
+	typ := reflect.TypeOf(jobFun)
+	if typ.Kind() != reflect.Func {
+		panic("only function can be schedule into the job queue.")
+	}
+	fname := getFunctionName(jobFun)
+	// 绑定任务
+	j.funcs[fname] = jobFun
+	j.fparams[fname] = params
+	j.jobFunc = fname
+	j.scheduleNextRun()
+
+
+	func getFunctionName(fn interface{}) string {
+    	return runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+    }
+
+    // 重点来了
+    func (j *Job) scheduleNextRun() {
+
+        // 初始化lastRun
+    	now := time.Now()
+    	if j.lastRun == time.Unix(0, 0) {
+    		j.lastRun = now
+    	}
+
+        // 判断日期是否合法
+    	if j.nextRun.After(now) {
+    		return
+    	}
+
+        // 判断日期单位
+    	switch j.unit {
+    	case seconds, minutes, hours:
+    		j.nextRun = j.lastRun.Add(j.periodDuration())
+    	case days:
+    		j.nextRun = j.roundToMidnight(j.lastRun)
+    		j.nextRun = j.nextRun.Add(j.atTime)
+    	case weeks:
+    		j.nextRun = j.roundToMidnight(j.lastRun)
+    		dayDiff := int(j.startDay)
+    		dayDiff -= int(j.nextRun.Weekday())
+    		if dayDiff != 0 {
+    			j.nextRun = j.nextRun.Add(time.Duration(dayDiff) * 24 * time.Hour)
+    		}
+    		j.nextRun = j.nextRun.Add(j.atTime)
+    	}
+
+    	// advance to next possible schedule
+    	for j.nextRun.Before(now) || j.nextRun.Before(j.lastRun) {
+    		j.nextRun = j.nextRun.Add(j.periodDuration())
+    	}
+    }
+
+
+```

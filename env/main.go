@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 )
 
@@ -16,6 +17,10 @@ type config struct {
 
 func main() {
 
+	//i := 0
+	//getTableName(i)
+	//return
+
 	// 测试1，解析到struct
 	cfg := config{}
 	if err := Parse(&cfg); err != nil {
@@ -23,4 +28,13 @@ func main() {
 	}
 
 	fmt.Printf("%+v\n", cfg)
+}
+
+func Test() {
+
+	// 判断是否是指针类型
+	t := "a"
+
+	fmt.Println(reflect.ValueOf(t).Kind() != reflect.Ptr)
+
 }
